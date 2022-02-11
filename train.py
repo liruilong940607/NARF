@@ -168,8 +168,7 @@ def validate(gen, val_loaders, config, ddp=False, metric=["SSIM", "PSNR"]):
                     gen_mask = gen_mask[None, None]                    
                     gen_color = gen_color - (1 - gen_mask)
 
-                    save_img(gen_color, f"{config.out_root}/result/{config.out}/rgb.png")
-                    save_img(img, f"{config.out_root}/result/{config.out}/real.png")
+                    save_img(torch.cat([gen_color, img], dim=3), f"{config.out_root}/result/{config.out}/result_{i}.png")
 
                 else:
                     # cnn

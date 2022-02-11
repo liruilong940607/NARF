@@ -40,6 +40,7 @@ class AnimalDataset(Dataset):
         # assert return_bone_params == True
 
         self.parser = AnimalSubjectParser(split="train" if config.train else "test_ood")
+        self.data_list = self.parser.data_list if self.train else self.parser.data_list[0:1]
 
         if self.return_bone_params:
             # self.cp = CameraProjection(size=size)
@@ -51,13 +52,10 @@ class AnimalDataset(Dataset):
         self.output_parents = None
 
     def __len__(self):
-        if self.train:
-            return len(self.parser) * self.num_repeat_in_epoch
-        else:
-            return 1
+        return len(self.data_list) * self.num_repeat_in_epoch
 
     def __getitem__(self, i):
-        action, frame_id, camera_id = self.parser.data_list[i % len(self.parser)]
+        action, frame_id, camera_id = self.data_list[i % len(self.data_list)]
         
         img = self.parser.load_image(action, frame_id, camera_id)
         img = cv2.resize(

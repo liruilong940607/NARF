@@ -14,7 +14,7 @@ def save_img(batch, name):  # b x 3 x size x size
     n = int(b ** 0.5)
 
     batch = batch.transpose(0, 2, 3, 1)
-    batch = batch[:n ** 2].reshape(n, n, size, size, 3)
+    batch = batch[:n ** 2].reshape(n, n, size, -1, 3)
     batch = np.concatenate(batch, axis=1)
     batch = np.concatenate(batch, axis=1)
     batch = np.clip(batch * 127.5 + 127.5, 0, 255).astype("uint8")
