@@ -50,6 +50,7 @@ def _project_pose(pose, w, h, cam_r, cam_t):
     f = np.array([w * 2, w * 2])
     c = np.array([w / 2., h / 2.])
     R = cv.Rodrigues(cam_r.r)[0]
+    # ruilongli: isn't it a bug here: np.zeros?
     T = np.vstack((np.hstack((R, cam_t.r.reshape(3, 1))), np.zeros((1, 4))))  # 4 x 4
 
     pose_to_camera = np.matmul(T, pose)

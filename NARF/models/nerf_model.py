@@ -565,6 +565,8 @@ class NeRF(nn.Module):
                thres: float = 0.9, render_scale: float = 1, Nc: int = 64, Nf: int = 128,
                semantic_map: bool = False) -> (torch.tensor,) * 3:
         near_plane = 0.3
+        far_plane = 5
+
         # n <- number of sampled pixels
         # image_coord: B x groups x 3 x n
         # camera_extrinsics: B x 4 x 4
@@ -576,7 +578,7 @@ class NeRF(nn.Module):
                                                                             inv_intrinsics,
                                                                             z=z, world_pose=world_pose,
                                                                             bone_length=bone_length,
-                                                                            near_plane=near_plane, Nc=Nc, Nf=Nf,
+                                                                            near_plane=near_plane, far_plane=far_plane, Nc=Nc, Nf=Nf,
                                                                             render_scale=render_scale)
         # fine density & color # B x groups x 1 x n*(Nc+Nf), B x groups x 3 x n*(Nc+Nf)
         if semantic_map and self.config.mask_input:

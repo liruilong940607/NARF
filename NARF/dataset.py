@@ -5,6 +5,7 @@ import random
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 from torch.utils.data import Dataset
@@ -13,6 +14,119 @@ from tqdm import tqdm
 from .models.model_utils import get_final_papernt_id
 from .models.utils_3d import THUmanPrior, CameraProjection, create_mask
 
+from .loader_animal import AnimalSubjectParser
+
+class AnimalDataset(Dataset):
+    
+    def __init__(self, config, size=400, random_background=False, return_bone_params=False,
+                 return_bone_mask=False, num_repeat_in_epoch=100, load_camera_intrinsics=False):
+        random.seed()
+        self.size = size
+        self.num_repeat_in_epoch = num_repeat_in_epoch
+
+        self.return_bone_params = return_bone_params
+        self.return_bone_mask = return_bone_mask  # only useful for cnn generator
+
+        # read params from config
+        self.data_root = config.data_root
+        self.config = config
+        self.random_background = config.random_background if hasattr(config, "random_background") else random_background
+        self.train = config.train
+        self.load_camera_intrinsics = load_camera_intrinsics
+
+        # assert self.random_background == False
+        assert self.load_camera_intrinsics == True
+        # assert return_bone_mask == False
+        # assert return_bone_params == True
+
+        self.parser = AnimalSubjectParser(split="train" if config.train else "test_ood")
+
+        if self.return_bone_params:
+            # self.cp = CameraProjection(size=size)
+            # self.hpp = THUmanPrior()
+            self.num_bone = 35
+            # self.num_valid_keypoints = self.hpp.num_valid_keypoints
+            self.intrinsics = None
+            self.parents = None
+        self.output_parents = None
+
+    def __len__(self):
+        if self.train:
+            return len(self.parser) * self.num_repeat_in_epoch
+        else:
+            return 1
+
+    def __getitem__(self, i):
+        action, frame_id, camera_id = self.parser.data_list[i % len(self.parser)]
+        
+        img = self.parser.load_image(action, frame_id, camera_id)
+        img = cv2.resize(
+            img.numpy(), (0, 0),
+            fx=.5,
+            fy=.5,
+            interpolation=cv2.INTER_AREA
+        ).transpose(2, 0, 1)
+
+        # bgra -> rgb, a
+        mask = img[3:] / 255.
+        img = img[:3]
+
+        if self.random_background:
+            backrgound = np.ones((3, self.size, self.size)) * np.random.randint(0, 256, size=(3, 1, 1))
+            img = img * mask + backrgound * (1 - mask)
+        else:
+            # blacken background
+            img = img * mask
+            if hasattr(self, "background_imgs"):
+                bg_idx = random.randint(0, len(self.background_imgs) - 1)
+                bg = self.background_imgs[bg_idx]
+                img = img + bg[::-1] * (1 - mask)
+
+        img = (img / 127.5 - 1).astype("float32")  # 3 x 128 x 128
+        mask = mask.astype("float32")  # 1 x 128 x 128
+
+        return_dict = {"img": img, "mask": mask, "idx": i}
+
+        if self.return_bone_params:
+            pose_data = self.parser.load_pose(action, frame_id)
+            K, w2c = self.parser.load_camera(action, frame_id, camera_id)
+            K[:2] *= 0.5
+
+            # bone space -> world space
+            pose_to_world = pose_data["pose_matrix"]
+            # bone space -> camera space
+            pose_to_camera = torch.einsum("ij,bjk->bik", w2c, pose_data["pose_matrix"])
+            # bone length is the norm(bone_tail) at bone space.
+            bone_length = torch.linalg.norm(
+                torch.einsum(
+                    "bij,bj->bi", 
+                    pose_data["rest_matrix"].inverse()[:, :3, :4], 
+                    F.pad(pose_data["rest_loc_tail"], (0, 1), value=1)
+                ),
+                dim=-1,
+                keepdim=True
+            )
+                        
+            if self.return_bone_mask:
+                disparity, bone_mask, part_bone_disparity, keypoint_mask = [np.array([0], dtype="float32") for _ in
+                                                                            range(4)]
+                return_dict["disparity"] = disparity
+                return_dict["bone_mask"] = bone_mask
+                return_dict["part_bone_disparity"] = part_bone_disparity
+                return_dict["keypoint_mask"] = keypoint_mask
+
+                if self.load_camera_intrinsics:
+                    inv_intrinsics = K.inverse()
+                    return_dict["inv_intrinsics"] = inv_intrinsics.numpy()
+
+            return_dict["pose_to_world"] = pose_to_world.numpy().astype("float32")
+            return_dict["pose_to_camera"] = pose_to_camera.numpy().astype("float32")
+            return_dict["bone_length"] = bone_length.numpy().astype("float32")
+        return return_dict
+
+    def random_sample(self):
+        i = random.randint(0, len(self) - 1)
+        return self.__getitem__(i)
 
 class THUmanDataset(Dataset):
     """THUman dataset"""
@@ -101,10 +215,13 @@ class THUmanDataset(Dataset):
             if self.just_cache:
                 return None, None, None
 
+            # ruilongli: [N, 4, 4] transforms
             pose_to_world = np.load(f"{self.data_root}/render_{self.size}_pose_to_world.npy")
+            # ruilongli: [N, 4, 4] transforms after apply camera (R | T)
             pose_to_camera = np.load(f"{self.data_root}/render_{self.size}_pose_to_camera.npy")
 
             if self.load_camera_intrinsics:
+                # ruilongli: [N, 3, 3]
                 inv_intrinsics = np.load(f"{self.data_root}/render_{self.size}_inv_intrinsics.npy")
             else:
                 inv_intrinsics = None

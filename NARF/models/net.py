@@ -287,10 +287,11 @@ class NeRFGenerator(nn.Module):
         super(NeRFGenerator, self).__init__()
         self.config = config
         self.size = size
-        self.intrinsics = intrinsics
-        self.inv_intrinsics = np.linalg.inv(intrinsics)
-        normalized_intrinsics = np.concatenate([intrinsics[:2] / size, np.array([[0, 0, 1]])], axis=0)
-        self.normalized_inv_intrinsics = np.linalg.inv(normalized_intrinsics)
+        if intrinsics is not None:
+            self.intrinsics = intrinsics
+            self.inv_intrinsics = np.linalg.inv(intrinsics)
+            normalized_intrinsics = np.concatenate([intrinsics[:2] / size, np.array([[0, 0, 1]])], axis=0)
+            self.normalized_inv_intrinsics = np.linalg.inv(normalized_intrinsics)
         self.num_bone = num_bone
         self.ray_sampler = ray_sampler
 

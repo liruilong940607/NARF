@@ -1,0 +1,49 @@
+out_root: ./results_animal/
+out: wlz_3_M_NARF_D_fix_matrix
+
+dataset:
+  name: animal
+  bs: 4 # batchsize
+  image_size: 400
+  train:
+    train: True
+    data_root: /home/ruilongli/workspace/blenderlib/results_multi_action5/
+  val:
+    novel_pose_novel_view:
+      train: False
+      data_root: /home/ruilongli/workspace/blenderlib/results_multi_action5/
+
+
+generator_params:
+  z_dim: 0
+  patch_size: 24
+  nerf_params:
+    hidden_size: 256  # hidden size of NeRF
+    Nc: 64  # number of points for coarse sampling
+    Nf: 64  # number of points for fine sampling
+    no_world_pose: False
+    concat: True
+    density_scale: 1
+    se3: True
+    # concat
+    mask_input: True
+    mask_bone_length: False
+
+
+loss:
+  nerf_loss_type: mse
+  color_coef: 1
+  mask_coef: 1
+
+# hyper parameters
+num_iter: 100000
+lr: 0.01
+scheduler_gamma: 0.99995
+val_interval: 100
+
+resume: # path to the snapshot if necessary
+
+# For DDP
+master_addr: 'localhost'
+master_port: '12355'
+backend: 'nccl'

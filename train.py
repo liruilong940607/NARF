@@ -10,8 +10,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from collections import deque
 
-from NARF.dataset import THUmanDataset, BlenderDataset
+from NARF.dataset import AnimalDataset, THUmanDataset, BlenderDataset, AnimalDataset
 from NARF.models.loss import SparseLoss
 from NARF.models.net import NeRFGenerator, Generator, NeRFAutoEncoder
 from NARF.models.model_utils import random_ray_sampler, all_reduce, get_module
@@ -74,6 +75,16 @@ def create_dataset(config_dataset, just_cache=False):
                 datasets_val[key] = BlenderDataset(val_dataset_config[key], size=size, return_bone_params=True,
                                                    random_background=False, num_repeat_in_epoch=1,
                                                    just_cache=just_cache)
+    
+    elif dataset_name == "animal":
+        dataset_train = AnimalDataset(train_dataset_config, size=size, return_bone_params=True, return_bone_mask=True,
+                                      random_background=False, load_camera_intrinsics=True)
+        datasets_val = dict()
+        for key in val_dataset_config.keys():
+            if val_dataset_config[key].data_root is not None:
+                datasets_val[key] = AnimalDataset(val_dataset_config[key], size=size, return_bone_params=True, return_bone_mask=True,
+                                                   random_background=False, num_repeat_in_epoch=1, load_camera_intrinsics=True)
+    
     else:
         assert False, f"{dataset_name} is not supported"
 
@@ -154,8 +165,12 @@ def validate(gen, val_loaders, config, ddp=False, metric=["SSIM", "PSNR"]):
                     if torch.isnan(gen_color).any():
                         print("NaN is detected")
                     gen_color = gen_color[None]
-                    gen_mask = gen_mask[None, None]
+                    gen_mask = gen_mask[None, None]                    
                     gen_color = gen_color - (1 - gen_mask)
+
+                    save_img(gen_color, f"{config.out_root}/result/{config.out}/rgb.png")
+                    save_img(img, f"{config.out_root}/result/{config.out}/real.png")
+
                 else:
                     # cnn
                     gen_color, gen_mask = get_module(gen, ddp).cnn_forward(disparity, part_bone_disparity,
@@ -174,6 +189,7 @@ def validate(gen, val_loaders, config, ddp=False, metric=["SSIM", "PSNR"]):
 
             for met in metric:
                 val_loss_color_metric[met] = all_reduce(val_loss_color_metric[met])
+                print ("metric [%s]: %.5f" % (met, val_loss_color_metric[met]))
 
         loss[key] = {"color": val_loss_color / num_data,
                      "mask": val_loss_mask / num_data}
@@ -271,12 +287,14 @@ def train_func(config, dataset, data_loader, rank, ddp=False, world_size=1):
     tensorboard_interval = config.tensorboard_interval
     save_interval = config.save_interval
 
+    stats_trace = deque([], maxlen=100)
+
     while iter < num_iter:
         for i, data in enumerate(train_loader):
-            if rank == 0:
-                print(iter)
-            if (iter + 1) % print_interval == 0 and rank == 0:
-                print(f"{iter + 1} iter, {(time.time() - start_time) / iter} s/iter")
+            # if rank == 0:
+            #     print(iter)
+            # if (iter + 1) % print_interval == 0 and rank == 0:
+            #     print(f"{iter + 1} iter, {(time.time() - start_time) / iter} s/iter")
             gen.train()
 
             batch = {key: val.cuda(non_blocking=True).float() for key, val in data.items()}
@@ -327,9 +345,15 @@ def train_func(config, dataset, data_loader, rank, ddp=False, world_size=1):
             # accumulate train loss
             train_loss_color += loss_color.item() * config.dataset.bs
             train_loss_mask += loss_mask.item() * config.dataset.bs
-
+            stats_trace.append({"color": loss_color, "mask": loss_mask})
             if (iter + 1) % tensorboard_interval == 0 and rank == 0:  # tensorboard
-                write(iter, loss, "gen", writer)
+                write(iter, sum([st["color"] for st in stats_trace]) / len(stats_trace), "color", writer)
+                write(iter, sum([st["mask"] for st in stats_trace]) / len(stats_trace), "mask", writer)
+            print (
+                iter, 
+                sum([st["color"] for st in stats_trace]) / len(stats_trace), 
+                sum([st["mask"] for st in stats_trace]) / len(stats_trace)
+            )
             loss.backward()
 
             gen_optimizer.step()
