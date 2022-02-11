@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import imageio
+import tqdm
 
 
 LOGGER = logging.getLogger(__name__)
@@ -142,41 +143,42 @@ class AnimalSubjectParser():
         bboxs_max = bboxs[:, :, 0]  # [J', 3]
         return bboxs_min, bboxs_max
 
+    def estimate_bone_space_near_far(self):
+        bboxs_min, bboxs_max = self.estimate_bone_space_bbox()
+        bboxs_points = torch.stack([
+            torch.stack([bboxs_min[:, 0], bboxs_min[:, 1], bboxs_min[:, 2]], dim=-1),
+            torch.stack([bboxs_min[:, 0], bboxs_min[:, 1], bboxs_max[:, 2]], dim=-1),
+            torch.stack([bboxs_min[:, 0], bboxs_max[:, 1], bboxs_max[:, 2]], dim=-1),
+            torch.stack([bboxs_max[:, 0], bboxs_max[:, 1], bboxs_max[:, 2]], dim=-1),
+            torch.stack([bboxs_min[:, 0], bboxs_max[:, 1], bboxs_min[:, 2]], dim=-1),
+            torch.stack([bboxs_max[:, 0], bboxs_max[:, 1], bboxs_min[:, 2]], dim=-1),
+            torch.stack([bboxs_max[:, 0], bboxs_min[:, 1], bboxs_max[:, 2]], dim=-1),
+            torch.stack([bboxs_max[:, 0], bboxs_min[:, 1], bboxs_min[:, 2]], dim=-1),
+        ], dim=0)  # [8, J', 3]
+        near, far = 1000, -1000
+        for action, frame_id, camera_id in tqdm.tqdm(self.data_list[:100]):
+            _, w2c = self.load_camera(action, frame_id, camera_id)
+            pose_matrix = self.load_pose(action, frame_id)["pose_matrix"]       
+            camera_loc = w2c.inverse()[:3, 3]
+            camera_loc_bone = torch.einsum(
+                "bij,j->bi", pose_matrix.inverse()[:, :3, :4], F.pad(camera_loc, (0, 1), value=1)
+            )
+            dists = torch.linalg.norm(bboxs_points - camera_loc_bone, dim=-1)
+            near = min(near, dists.min())
+            far = max(far, dists.max())
+        print (near, far)
+
+
 
 if __name__ == "__main__":
     parser = AnimalSubjectParser()
 
-    # In each bone space, calculate an effective bounding-box by 
-    # accounting those verts that listen to this bone.
-    path = os.path.join(parser.root_dir, parser.actions[0], "meta_data.npz")
-    with open(path, mode="rb") as fp:
-        data = np.load(fp)
-        real_bones_idxs = np.where(np.max(data["weights"], axis=0) > 0)[0].tolist()
-        rest_matrix = torch.from_numpy(data["rest_matrix"]).float()
-        rest_verts = torch.from_numpy(data["rest_verts"]).float()
-        lbs_weights = torch.from_numpy(data["weights"]).float()
+    bboxs_min, bboxs_max = parser.estimate_bone_space_bbox()
+    print (bboxs_min.min(dim=0).values)
+    print (bboxs_max.max(dim=0).values)
+
+    parser.estimate_bone_space_near_far()
     
-    bboxs = []
-    for i, bone_id in enumerate(real_bones_idxs):
-        bone_verts = torch.einsum(
-            "ij,bj->bi",
-            rest_matrix[bone_id, :3, :4],
-            F.pad(rest_verts[lbs_weights[:, bone_id] > 0], (0, 1), value=1)
-        )
-        bboxs.append(
-            torch.cat([bone_verts.min(dim=0).values, bone_verts.max(dim=0).values])
-        )
-    bboxs = torch.stack(bboxs).reshape(-1, 3, 2)
-    bboxs = torch.cat([bboxs[:, :, 0].min(dim=0).values, bboxs[:, :, 1].max(dim=0).values])
-    print (bboxs)
-
-    for action, fid, cid in parser.data_list:
-        K, w2c = parser.load_camera(action, fid, cid)
-        c2w = w2c.inverse()
-        cam_pos = c2w[:3, 3]
-        pose_matrix = parser.load_pose(action, fid)["pose_matrix"]
-        cam_pos_bone = pose_matrix.inverse()[:3, :4] @ F.pad(cam_pos, (0, 1), value=1)
-
 
     # action, frame_id, _ = parser.data_list[100]
     # parser.load_pose(action, frame_id)
