@@ -22,13 +22,14 @@ class AnimalSubjectParser():
         self,
         subject_id: str = "Hare_male_full_RM",
         root_fp: str = "/home/ruilongli/workspace/blenderlib/results_multi_action5/",
-        split_test_actions: List[str] = ["Death_1", "Death_2", "Death_Sink"],
+        # split_test_actions: List[str] = ["Death_1", "Death_2", "Death_Sink"],
+        split_test_actions: List[str] = None,
         split: str = "all",
     ):
         assert split in AnimalSubjectParser.SPLIT 
         self.id = subject_id
         self.split = split
-        self.split_test_actions = split_test_actions
+        # self.split_test_actions = split_test_actions
         self.root_fp = root_fp
         self.dtype = torch.get_default_dtype()
         self.root_dir = os.path.join(root_fp, subject_id)
@@ -37,6 +38,8 @@ class AnimalSubjectParser():
             fp for fp in os.listdir(self.root_dir)
             if os.path.exists(os.path.join(self.root_dir, fp, "camera.json"))
         ])
+        if split_test_actions is None:
+            split_test_actions = actions[: len(actions) // 2]
         self.actions = {
             "all": actions,
             "train": list(set(actions) - set(split_test_actions)),

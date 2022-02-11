@@ -1,5 +1,5 @@
 out_root: ./results_animal/
-out: wlz_3_M_NARF_D_fix_matrix
+out: wlz_3_M_NARF_D_half_dataset
 
 dataset:
   name: animal
